@@ -7,6 +7,11 @@ This package provides a ROS2 composable node for converting a `PointCloud2` mess
 - Subscribes to `PointCloud2` messages in [Ouster Format](https://github.com/ouster-lidar/ouster-ros/blob/master/include/ouster_ros/os_point.h).
 - Publishes `PointCloud2` messages in [Autoware Format](https://autowarefoundation.github.io/autoware-documentation/main/design/autoware-architecture/sensing/data-types/point-cloud/).
 
+## Changelog
+- Added ability to limit intensity range (seemingly helps with Centerpoint if you keep intensity range within Velodyne values)
+- Added ability to switch intensity between Reflectivity or Intensity channels
+- Properly handle timestamps (copy timestamp from original message)
+
 ## Usage
 
 1. Build the package:
