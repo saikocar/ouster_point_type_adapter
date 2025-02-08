@@ -20,6 +20,8 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 option(CMAKE_POSITION_INDEPENDENT_CODE "Build position independent code." ON)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -Ofast -pipe")
+
 add_library(${PROJECT_NAME} SHARED
   src/ouster_point_type_adapter_component.cpp
 )

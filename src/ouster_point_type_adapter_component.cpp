@@ -15,99 +15,83 @@ namespace ouster_point_type_adapter
   {
     subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("input", rclcpp::SensorDataQoS{}.keep_last(1), std::bind(&OusterPointTypeAdapter::pointCloudCallback, this, std::placeholders::_1));
     publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("output", rclcpp::SensorDataQoS());
+
     this->declare_parameter("intensity_scale", (int64_t) 255);
+    scale_param = this->get_parameter("intensity_scale").as_int();
+    if (scale_param < 0) scale_param = 0;
+    if (scale_param > 255) scale_param = 255;
+
     this->declare_parameter("reflectivity_as_intensity", (bool) false);
+    reflectivity_as_intensity = this->get_parameter("reflectivity_as_intensity").as_bool();
+
+    this->declare_parameter("intensity_calculation_frameno", (uint16_t) 10);
+    calc_frame_no = this->get_parameter("intensity_calculation_frameno").as_int();
+
+    current_frame_no = 0;
+    max_intensity = 0.0f;
+    first_run = true;
+    alloc_size = 0;
   }
 
   // based on https://github.com/autowarefoundation/autoware.universe/issues/4978#issuecomment-1971777511
-  void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+  void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr input_msg)
   {
-    // Instantiate output messages
-    auto pointcloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
+    // instantiate input pointcloud
+    pcl::PointCloud<ouster_ros::Point>::Ptr input_pointcloud(new pcl::PointCloud<ouster_ros::Point>);
+    pcl::fromROSMsg(*input_msg, *input_pointcloud);
 
-    // Instantiate pcl pointcloud message for the input point cloud
-    pcl::PointCloud<ouster_ros::Point>::Ptr input_pointcloud(
-        new pcl::PointCloud<ouster_ros::Point>);
-
-    // Convert ros message to pcl
-    pcl::fromROSMsg(*msg, *input_pointcloud);
-
-    // Instantiate pcl pointcloud message for the output point cloud
-    pcl::PointCloud<autoware_point_types::PointXYZIRCAEDT>::Ptr output_pointcloud(
-        new pcl::PointCloud<autoware_point_types::PointXYZIRCAEDT>);
-
-    output_pointcloud->reserve(input_pointcloud->points.size());
-
-    bool reflectivity_as_intensity = this->get_parameter("reflectivity_as_intensity").as_bool();
-
-    bool first = true;
-    float max_intensity = 0.0;
-    float min_intensity = 0.0;
-    uint32_t count = 0;
-    for (const auto &point_in : input_pointcloud->points)
-    {
-      if (first) {
-        if (reflectivity_as_intensity) {
-        max_intensity = point_in.reflectivity;
-        min_intensity = point_in.reflectivity;
-        } else {
-        max_intensity = point_in.intensity;
-        min_intensity = point_in.intensity;
+    // maximum intensity range calculation only every x frame as defined as calc_frame_no (default is 1s if lidar is at 10Hz, for example)
+    if (current_frame_no == 0) {
+      bool first_point_in_cloud = true;
+      max_intensity = 0.0;
+      for (const auto &point_in : input_pointcloud->points)
+      {
+        float intensity = (reflectivity_as_intensity) ? point_in.reflectivity : point_in.intensity;
+        if (first_point_in_cloud) {
+          max_intensity = intensity;
+          first_point_in_cloud = false;
+          continue;
         }
-
-        count++;
-        first = false;
-        continue;
+        if (intensity > max_intensity) max_intensity = intensity;
       }
-
-      if (reflectivity_as_intensity) {
-        if (point_in.reflectivity > max_intensity) max_intensity = point_in.reflectivity;
-        if (point_in.reflectivity < min_intensity) min_intensity = point_in.reflectivity;
-      } else {
-        if (point_in.intensity > max_intensity) max_intensity = point_in.intensity;
-        if (point_in.intensity < min_intensity) min_intensity = point_in.intensity;
-      }
-      count++;
     }
-    //std::stringstream ss;
-    //ss << min_intensity << "~" <<max_intensity<< "c:"<<count<<"\n";
-    //RCLCPP_INFO_STREAM(this->get_logger(), ss.str());
-    // Convert pcl from ouster to pcl autoware format
+    current_frame_no++;
+    if (current_frame_no >= calc_frame_no) current_frame_no = 0;
 
-    uint8_t max_scale = 255;
-    int64_t scale_param = this->get_parameter("intensity_scale").as_int();
-    if (scale_param < 0) scale_param = 0;
-    if (scale_param > 255) scale_param = 255;
-    max_scale = scale_param;
-    autoware_point_types::PointXYZIRCAEDT point_out{};
+    // instantiate output point cloud
+    pcl::PointCloud<autoware_point_types::PointXYZIRADRT>::Ptr output_pointcloud(new pcl::PointCloud<autoware_point_types::PointXYZIRADRT>);
+    output_pointcloud->header = input_pointcloud->header;
+    output_pointcloud->height = input_pointcloud->height;
+    output_pointcloud->width = input_pointcloud->width; // we're copying the size because otherwise pcl computes it every frame
+    if (first_run) { // determine allocation size of vector only upon first frame
+      alloc_size = input_pointcloud->points.size();
+      first_run = false;
+    }
+    output_pointcloud->reserve(alloc_size);
+
+    // convert from ouster to autoware format: X, Y, Z, intensity, ring, azimuth, distance, return type(unused, only for dual return), timestamp
+    autoware_point_types::PointXYZIRADRT point_out{}; // PointXYZIRCAEDT -> PointXYZIRADRT
     for (const auto &point_in : input_pointcloud->points)
     {
+      float intensity = (reflectivity_as_intensity) ? point_in.reflectivity : point_in.intensity;
       point_out.x = point_in.x;
       point_out.y = point_in.y;
       point_out.z = point_in.z;
-      if (reflectivity_as_intensity) {
-        point_out.intensity = uint8_t((point_in.reflectivity/max_intensity)*max_scale);
-      } else {
-        point_out.intensity = uint8_t((point_in.intensity/max_intensity)*max_scale);
-      }
-      point_out.return_type = 0;
-      point_out.channel = point_in.ring;
+      // this calculation is necessary because velodyne models return uint8 even though autoware's intensity type is float
+      // i.e. this is for centerpoint compatibility
+      point_out.intensity = uint8_t((intensity/max_intensity)*scale_param);
+      point_out.ring = point_in.ring;
       point_out.azimuth = std::atan2(point_in.y, point_in.x);
       point_out.distance = float(point_in.range) / 1000.0;
-      point_out.elevation = std::asin(point_in.z / point_out.distance);
       point_out.time_stamp = point_in.t;
-      output_pointcloud->points.emplace_back(point_out);
+      output_pointcloud->points.push_back(point_out);
     }
-    output_pointcloud->header = input_pointcloud->header;
-    output_pointcloud->height = input_pointcloud->height;
-    output_pointcloud->width = input_pointcloud->width;
 
-    // Convert pcl to ros message
-    pcl::toROSMsg(*output_pointcloud, *pointcloud_msg);
-    pointcloud_msg->header.stamp = this->now();
-
-    // Publish updated pointcloud message
-    publisher_->publish(*pointcloud_msg);
+    // Convert pcl to ros message & publish
+    auto output_msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
+    pcl::toROSMsg(*output_pointcloud, *output_msg);
+    output_msg->header = input_msg->header;
+    publisher_->publish(std::move(output_msg));
   }
 
 } // namespace ouster_point_type_adapter
