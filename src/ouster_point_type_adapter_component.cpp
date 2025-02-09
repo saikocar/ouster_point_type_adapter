@@ -34,7 +34,7 @@ namespace ouster_point_type_adapter
   }
 
   // based on https://github.com/autowarefoundation/autoware.universe/issues/4978#issuecomment-1971777511
-  void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr input_msg)
+  void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::UniquePtr input_msg)
   {
     // instantiate input pointcloud
     pcl::PointCloud<ouster_ros::Point>::Ptr input_pointcloud(new pcl::PointCloud<ouster_ros::Point>);

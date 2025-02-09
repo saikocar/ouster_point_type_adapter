@@ -14,7 +14,7 @@ public:
   explicit OusterPointTypeAdapter(const rclcpp::NodeOptions & options);
 
 private:
-  void pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
+  void pointCloudCallback(const sensor_msgs::msg::PointCloud2::UniquePtr input_msg);
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr subscription_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr publisher_;
   //pcl::PointCloud<autoware_point_types::PointXYZIRADRT>::Ptr *output_pointcloud_;
