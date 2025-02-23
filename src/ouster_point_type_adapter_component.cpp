@@ -20,7 +20,7 @@ namespace ouster_point_type_adapter
   }
 
   // based on https://github.com/autowarefoundation/autoware.universe/issues/4978#issuecomment-1971777511
-  void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)
+  void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
   {
     // Instantiate output messages
     auto pointcloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
@@ -33,9 +33,11 @@ namespace ouster_point_type_adapter
     pcl::fromROSMsg(*msg, *input_pointcloud);
 
     // Instantiate pcl pointcloud message for the output point cloud
-    pcl::PointCloud<autoware_point_types::PointXYZIRCAEDT>::Ptr output_pointcloud(
-        new pcl::PointCloud<autoware_point_types::PointXYZIRCAEDT>);
-
+    pcl::PointCloud<autoware_point_types::PointXYZIRADRT>::Ptr output_pointcloud(
+        new pcl::PointCloud<autoware_point_types::PointXYZIRADRT>);
+    output_pointcloud->header = input_pointcloud->header;
+    output_pointcloud->height = input_pointcloud->height;
+    output_pointcloud->width = input_pointcloud->width;
     output_pointcloud->reserve(input_pointcloud->points.size());
 
     bool reflectivity_as_intensity = this->get_parameter("reflectivity_as_intensity").as_bool();
@@ -79,7 +81,7 @@ namespace ouster_point_type_adapter
     if (scale_param < 0) scale_param = 0;
     if (scale_param > 255) scale_param = 255;
     max_scale = scale_param;
-    autoware_point_types::PointXYZIRCAEDT point_out{};
+    autoware_point_types::PointXYZIRADRT point_out{};
     for (const auto &point_in : input_pointcloud->points)
     {
       point_out.x = point_in.x;
@@ -91,16 +93,12 @@ namespace ouster_point_type_adapter
         point_out.intensity = uint8_t((point_in.intensity/max_intensity)*max_scale);
       }
       point_out.return_type = 0;
-      point_out.channel = point_in.ring;
+      point_out.ring = point_in.ring;
       point_out.azimuth = std::atan2(point_in.y, point_in.x);
       point_out.distance = float(point_in.range) / 1000.0;
-      point_out.elevation = std::asin(point_in.z / point_out.distance);
       point_out.time_stamp = point_in.t;
       output_pointcloud->points.emplace_back(point_out);
     }
-    output_pointcloud->header = input_pointcloud->header;
-    output_pointcloud->height = input_pointcloud->height;
-    output_pointcloud->width = input_pointcloud->width;
 
     // Convert pcl to ros message
     pcl::toROSMsg(*output_pointcloud, *pointcloud_msg);
