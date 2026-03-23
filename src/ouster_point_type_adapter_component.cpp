@@ -4,9 +4,8 @@
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "pcl_conversions/pcl_conversions.h"
 #include "ouster_ros/os_point.h"
-#include "autoware/point_types/types.hpp"
+#include <autoware/point_types/types.hpp>
 #include <cmath>
-#include <sstream>
 
 namespace ouster_point_type_adapter
 {
@@ -15,114 +14,70 @@ namespace ouster_point_type_adapter
   {
     subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("input", rclcpp::SensorDataQoS{}.keep_last(1), std::bind(&OusterPointTypeAdapter::pointCloudCallback, this, std::placeholders::_1));
     publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("output", rclcpp::SensorDataQoS());
-    this->declare_parameter("gamma", (double) 1.0);
-    //this->declare_parameter("reflectivity_as_intensity", (bool) false);
+    this->declare_parameter("intensity_scale", (int64_t) 255);
+    this->declare_parameter("reflectivity_as_intensity", (bool) false);
+    this->declare_parameter("gamma", 1.0);
   }
 
   // based on https://github.com/autowarefoundation/autoware.universe/issues/4978#issuecomment-1971777511
   void OusterPointTypeAdapter::pointCloudCallback(const sensor_msgs::msg::PointCloud2::UniquePtr msg)
   {
-    // Instantiate output messages
     auto pointcloud_msg = std::make_shared<sensor_msgs::msg::PointCloud2>();
 
-    // Instantiate pcl pointcloud message for the input point cloud
     pcl::PointCloud<ouster_ros::Point>::Ptr input_pointcloud(
         new pcl::PointCloud<ouster_ros::Point>);
-
-    // Convert ros message to pcl
     pcl::fromROSMsg(*msg, *input_pointcloud);
 
-    // Instantiate pcl pointcloud message for the output point cloud
     pcl::PointCloud<autoware::point_types::PointXYZIRCAEDT>::Ptr output_pointcloud(
         new pcl::PointCloud<autoware::point_types::PointXYZIRCAEDT>);
     output_pointcloud->header = input_pointcloud->header;
     output_pointcloud->height = input_pointcloud->height;
     output_pointcloud->width = input_pointcloud->width;
     output_pointcloud->reserve(input_pointcloud->points.size());
-    output_pointcloud->is_dense = true;
 
-    /*bool reflectivity_as_intensity = this->get_parameter("reflectivity_as_intensity").as_bool();
+    const bool reflectivity_as_intensity = this->get_parameter("reflectivity_as_intensity").as_bool();
+    const double gamma = this->get_parameter("gamma").as_double();
 
-    bool first = true;
-    float max_intensity = 0.0;
-    float min_intensity = 0.0;
-    uint32_t count = 0;
+    // Find max intensity/reflectivity for normalization
+    float max_val = 0.0f;
     for (const auto &point_in : input_pointcloud->points)
     {
-      if (first) {
-        if (reflectivity_as_intensity) {
-        max_intensity = point_in.reflectivity;
-        min_intensity = point_in.reflectivity;
-        } else {
-        max_intensity = point_in.intensity;
-        min_intensity = point_in.intensity;
-        }
+      float val = reflectivity_as_intensity ? point_in.reflectivity : point_in.intensity;
+      if (val > max_val) max_val = val;
+    }
+    if (max_val == 0.0f) max_val = 1.0f;
 
-        count++;
-        first = false;
-        continue;
-      }
+    int64_t scale_param = this->get_parameter("intensity_scale").as_int();
+    if (scale_param < 0) scale_param = 0;
+    if (scale_param > 255) scale_param = 255;
+    const uint8_t max_scale = static_cast<uint8_t>(scale_param);
 
-      if (reflectivity_as_intensity) {
-        if (point_in.reflectivity > max_intensity) max_intensity = point_in.reflectivity;
-        if (point_in.reflectivity < min_intensity) min_intensity = point_in.reflectivity;
-      } else {
-        if (point_in.intensity > max_intensity) max_intensity = point_in.intensity;
-        if (point_in.intensity < min_intensity) min_intensity = point_in.intensity;
-      }
-      count++;
-    }*/
-    //std::stringstream ss;
-    //ss << min_intensity << "~" <<max_intensity<< "c:"<<count<<"\n";
-    //RCLCPP_INFO_STREAM(this->get_logger(), ss.str());
-    // Convert pcl from ouster to pcl autoware format
-
-    //uint8_t max_scale = 255;
-    //int64_t scale_param = this->get_parameter("intensity_scale").as_int();
-    //if (scale_param < 0) scale_param = 0;
-    //if (scale_param > 255) scale_param = 255;
-    //max_scale = scale_param;
-    float gamma = (float) this->get_parameter("gamma").as_double();
-    bool gamma_adjust = (gamma == 1.0) ? false : true;
     autoware::point_types::PointXYZIRCAEDT point_out{};
-    size_t points_count = 0;
-    double prev_stamp = 0;
-    double stamp_sum = 0;
     for (const auto &point_in : input_pointcloud->points)
     {
-      if (!std::isfinite(point_in.x) || !std::isfinite(point_in.y) || !std::isfinite(point_in.z)) continue; //remove NaNs
       point_out.x = point_in.x;
       point_out.y = point_in.y;
       point_out.z = point_in.z;
-      point_out.intensity = (gamma_adjust) ? uint8_t(std::clamp(std::pow(255.0*(point_in.reflectivity/255.0), gamma), 0.0, 255.0)+0.5) : static_cast<uint8_t>(point_in.reflectivity);
+
+      float raw_val = reflectivity_as_intensity ? point_in.reflectivity : point_in.intensity;
+      float normalized = raw_val / max_val;
+      if (gamma != 1.0) {
+        normalized = std::pow(normalized, static_cast<float>(gamma));
+      }
+      point_out.intensity = static_cast<uint8_t>(normalized * max_scale);
+
       point_out.return_type = 0;
       point_out.channel = point_in.ring;
-      point_out.azimuth = std::atan2(point_in.y, point_in.x);
+      point_out.azimuth = -std::atan2(point_in.y, point_in.x);
       point_out.elevation = std::atan2(point_in.z, std::sqrt(point_in.x * point_in.x + point_in.y * point_in.y));
-      point_out.distance = float(point_in.range) / 1000.0;
-      point_out.time_stamp = static_cast<uint32_t>(point_in.t); // nanoseconds as uint32_t
+      point_out.distance = static_cast<float>(point_in.range) / 1000.0f;
+      point_out.time_stamp = point_in.t;
       output_pointcloud->points.emplace_back(point_out);
-      points_count++;
-
-      stamp_sum += static_cast<double>(point_in.t) / 1e9 - prev_stamp;
-      prev_stamp = static_cast<double>(point_in.t) / 1e9;
-    }
-    if (output_pointcloud->size() != points_count) {
-      output_pointcloud->resize(points_count);
-      output_pointcloud->height = 1;
-      output_pointcloud->width = points_count;
     }
 
-    // Convert pcl to ros message
     pcl::toROSMsg(*output_pointcloud, *pointcloud_msg);
-    pointcloud_msg->header.stamp = msg->header.stamp;//this->now();
-    pointcloud_msg->height = 1;
-    pointcloud_msg->width = points_count;
-
-    // Publish updated pointcloud message
+    pointcloud_msg->header.stamp = this->now();
     publisher_->publish(*pointcloud_msg);
-
-    RCLCPP_INFO_STREAM(get_logger(), "stamp_sum : " << stamp_sum);
   }
 
 } // namespace ouster_point_type_adapter
