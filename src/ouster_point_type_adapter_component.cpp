@@ -12,7 +12,7 @@ namespace ouster_point_type_adapter
 {
   OusterPointTypeAdapter::OusterPointTypeAdapter(const rclcpp::NodeOptions &options)
       : Node("ouster_point_type_adapter", options),
-        updater_(this),
+        updater_(this, 0.1),
         last_callback_time_(this->now())
   {
     subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("input", rclcpp::SensorDataQoS{}.keep_last(1), std::bind(&OusterPointTypeAdapter::pointCloudCallback, this, std::placeholders::_1));
@@ -49,7 +49,7 @@ namespace ouster_point_type_adapter
     timestamp_diff_warn_ms_ = this->get_parameter("timestamp_diff_warn_ms").as_double();
 
     // Register diagnostic task
-    updater_.setHardwareID("ouster_point_type_adapter");
+    updater_.setHardwareID(this->get_fully_qualified_name());
     updater_.add("point_type_adapter", this, &OusterPointTypeAdapter::checkAll);
   }
 
