@@ -11,6 +11,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(pcl_conversions REQUIRED)
 find_package(ouster_ros REQUIRED)
 find_package(autoware_point_types REQUIRED)
+find_package(diagnostic_updater REQUIRED)
 
 # ==== Options ====
 add_compile_options(-Wall -Wextra)
@@ -42,6 +43,7 @@ ament_target_dependencies(${PROJECT_NAME}
   pcl_conversions
   ouster_ros
   autoware_point_types
+  diagnostic_updater
 )
 
 rclcpp_components_register_nodes(${PROJECT_NAME} PLUGIN "ouster_point_type_adapter::OusterPointTypeAdapter" EXECUTABLE ouster_point_type_adapter)
