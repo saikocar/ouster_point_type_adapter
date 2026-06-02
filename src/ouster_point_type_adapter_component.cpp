@@ -3,8 +3,8 @@
 #include "rclcpp_components/register_node_macro.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "pcl_conversions/pcl_conversions.h"
-#include "ouster_ros/include/ouster_ros/os_point.h"
-#include "autoware_point_types/types.hpp"
+#include "ouster_ros/os_point.h"
+#include "autoware/point_types/types.hpp"
 #include <cmath>
 #include <sstream>
 
@@ -33,8 +33,8 @@ namespace ouster_point_type_adapter
     pcl::fromROSMsg(*msg, *input_pointcloud);
 
     // Instantiate pcl pointcloud message for the output point cloud
-    pcl::PointCloud<autoware_point_types::PointXYZIRADRT>::Ptr output_pointcloud(
-        new pcl::PointCloud<autoware_point_types::PointXYZIRADRT>);
+    pcl::PointCloud<autoware::point_types::PointXYZIRCAEDT>::Ptr output_pointcloud(
+        new pcl::PointCloud<autoware::point_types::PointXYZIRCAEDT>);
     output_pointcloud->header = input_pointcloud->header;
     output_pointcloud->height = input_pointcloud->height;
     output_pointcloud->width = input_pointcloud->width;
@@ -71,17 +71,14 @@ namespace ouster_point_type_adapter
       }
       count++;
     }
-    //std::stringstream ss;
-    //ss << min_intensity << "~" <<max_intensity<< "c:"<<count<<"\n";
-    //RCLCPP_INFO_STREAM(this->get_logger(), ss.str());
-    // Convert pcl from ouster to pcl autoware format
 
     uint8_t max_scale = 255;
     int64_t scale_param = this->get_parameter("intensity_scale").as_int();
     if (scale_param < 0) scale_param = 0;
     if (scale_param > 255) scale_param = 255;
     max_scale = scale_param;
-    autoware_point_types::PointXYZIRADRT point_out{};
+    autoware::point_types::PointXYZIRCAEDT point_out{};
+
     for (const auto &point_in : input_pointcloud->points)
     {
       point_out.x = point_in.x;
@@ -93,7 +90,7 @@ namespace ouster_point_type_adapter
         point_out.intensity = uint8_t((point_in.intensity/max_intensity)*max_scale);
       }
       point_out.return_type = 0;
-      point_out.ring = point_in.ring;
+      point_out.channel = point_in.ring;
       point_out.azimuth = std::atan2(point_in.y, point_in.x);
       point_out.distance = float(point_in.range) / 1000.0;
       point_out.time_stamp = point_in.t;
