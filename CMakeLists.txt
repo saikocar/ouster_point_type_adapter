@@ -35,6 +35,10 @@ include_directories(SYSTEM
   ${PCL_INCLUDE_DIRS}
 )
 
+# 版を名乗る(dw-notes misc/version_stamping_policy_20260822.md)
+include(cmake/dw_version.cmake)
+dw_version_attach(${PROJECT_NAME})
+
 ament_target_dependencies(${PROJECT_NAME}
   rclcpp
   rclcpp_components

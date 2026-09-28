@@ -21,3 +21,11 @@ This package provides a ROS2 composable node for converting a `PointCloud2` mess
 3. Launch `ouster_point_type_adapter` component in a new container:
    ```bash
    ros2 launch ouster_point_type_adapter ouster_point_type_adapter.launch.py
+
+## sort_by_time (2026-09-29)
+- Parameter `sort_by_time` (bool, default `true`): publish points sorted by `time_stamp` (stable sort, ring order kept within a column).
+- Why: ouster-ros fills the cloud row-major (ring by ring), so timestamps jump back at every ring boundary.
+  Autoware's distortion corrector integrates ego motion sequentially from the previously iterated point,
+  which leaves a lateral offset proportional to lateral acceleration (about 0.3-0.4 m per 1 m/s^2 for 128 rings),
+  and it takes the first point in the array as the reference time.
+- The node prints `version <branch>@<hash>` at startup.

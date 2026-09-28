@@ -5,6 +5,8 @@
 #include "pcl_conversions/pcl_conversions.h"
 #include "ouster_ros/include/ouster_ros/os_point.h"
 #include "autoware_point_types/types.hpp"
+#include "dw_version.hpp"
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -16,6 +18,14 @@ namespace ouster_point_type_adapter
     subscription_ = this->create_subscription<sensor_msgs::msg::PointCloud2>("input", rclcpp::SensorDataQoS{}.keep_last(1), std::bind(&OusterPointTypeAdapter::pointCloudCallback, this, std::placeholders::_1));
     publisher_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("output", rclcpp::SensorDataQoS());
     this->declare_parameter("gamma", (double) 1.0);
+    // 点を時刻順に並べ替えて出す(既定 true)。
+    // ouster-ros は点群をリングごと(行優先)に詰めるので、そのままだと 1 スキャンの中で時刻が (リング数 - 1) 回巻き戻る。
+    // Autoware の歪み補正(distortion_corrector)は点を並び順に、前の点との時刻差で車の動きを積算するため、
+    // 巻き戻りのたびに横のずれが残り、横加速度に比例して点群が横へずれる(128 リングで 1 m/s^2 あたり平均 0.3〜0.4 m)。
+    // また歪み補正の基準の時刻は配列の先頭の点の時刻なので、先頭を最も早い点にしておく。
+    this->declare_parameter("sort_by_time", true);
+    RCLCPP_INFO(this->get_logger(), "version %s", DW_VERSION);
+    RCLCPP_INFO(this->get_logger(), "sort_by_time: %s", this->get_parameter("sort_by_time").as_bool() ? "true" : "false");
     //this->declare_parameter("reflectivity_as_intensity", (bool) false);
   }
 
@@ -111,6 +121,14 @@ namespace ouster_point_type_adapter
       stamp_sum += static_cast<double>(point_in.t) / 1e9 - prev_stamp;
       prev_stamp = static_cast<double>(point_in.t) / 1e9;
     }
+    if (this->get_parameter("sort_by_time").as_bool()) {
+      // 同じ時刻(同じ列)の点は元の順(リング順)を保つ
+      std::stable_sort(
+        output_pointcloud->points.begin(), output_pointcloud->points.end(),
+        [](const autoware_point_types::PointXYZIRADRT & a, const autoware_point_types::PointXYZIRADRT & b) {
+          return a.time_stamp < b.time_stamp;
+        });
+    }
     if (output_pointcloud->size() != points_count) {
       output_pointcloud->resize(points_count);
       output_pointcloud->height = 1;
@@ -126,7 +144,7 @@ namespace ouster_point_type_adapter
     // Publish updated pointcloud message
     publisher_->publish(*pointcloud_msg);
 
-    RCLCPP_INFO_STREAM(get_logger(), "stamp_sum : " << stamp_sum);
+    RCLCPP_DEBUG_STREAM(get_logger(), "stamp_sum : " << stamp_sum);  // 毎スキャン INFO で出していたのを DEBUG に
   }
 
 } // namespace ouster_point_type_adapter
