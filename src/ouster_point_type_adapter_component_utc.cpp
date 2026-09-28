@@ -82,14 +82,16 @@ namespace ouster_point_type_adapter
     //if (scale_param < 0) scale_param = 0;
     //if (scale_param > 255) scale_param = 255;
     //max_scale = scale_param;
+    constexpr int64_t TAI_UTC_OFFSET_SEC = 37;
+    auto tai_stamp = rclcpp::Time(msg->header.stamp);
+    auto utc_stamp = rclcpp::Time(tai_stamp.nanoseconds() + TAI_UTC_OFFSET_SEC * 1e9);
+
     float gamma = (float) this->get_parameter("gamma").as_double();
     bool gamma_adjust = (gamma == 1.0) ? false : true;
     autoware_point_types::PointXYZIRADRT point_out{};
     size_t points_count = 0;
-    double prev_stamp = 0;
-    double stamp_sum = 0;
     for (const auto &point_in : input_pointcloud->points)
-    { 
+    {
       if (!std::isfinite(point_in.x) || !std::isfinite(point_in.y) || !std::isfinite(point_in.z)) continue; //remove NaNs
       point_out.x = point_in.x;
       point_out.y = point_in.y;
@@ -104,12 +106,9 @@ namespace ouster_point_type_adapter
       point_out.ring = point_in.ring;
       point_out.azimuth = std::atan2(point_in.y, point_in.x);
       point_out.distance = float(point_in.range) / 1000.0;
-      point_out.time_stamp = static_cast<double>(point_in.t) / 1e9 + rclcpp::Time(msg->header.stamp).seconds(); // convert nsec to sec
+      point_out.time_stamp = static_cast<double>(point_in.t)/1e9 + rclcpp::Time(utc_stamp).seconds();//rclcpp::Time(msg->header.stamp).seconds();
       output_pointcloud->points.emplace_back(point_out);
       points_count++;
-
-      stamp_sum += static_cast<double>(point_in.t) / 1e9 - prev_stamp;
-      prev_stamp = static_cast<double>(point_in.t) / 1e9;
     }
     if (output_pointcloud->size() != points_count) {
       output_pointcloud->resize(points_count);
@@ -119,14 +118,12 @@ namespace ouster_point_type_adapter
 
     // Convert pcl to ros message
     pcl::toROSMsg(*output_pointcloud, *pointcloud_msg);
-    pointcloud_msg->header.stamp = msg->header.stamp;//this->now();
+    pointcloud_msg->header.stamp = utc_stamp;//this->now();//msg->header.stamp;//this->now();
     pointcloud_msg->height = 1;
     pointcloud_msg->width = points_count;
 
     // Publish updated pointcloud message
     publisher_->publish(*pointcloud_msg);
-
-    RCLCPP_INFO_STREAM(get_logger(), "stamp_sum : " << stamp_sum);
   }
 
 } // namespace ouster_point_type_adapter
