@@ -3,7 +3,12 @@
 #include "rclcpp_components/register_node_macro.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "pcl_conversions/pcl_conversions.h"
+// ouster_ros の install のヘッダの置き場は版で違う(実機は 2026-04-03 の入れ替えから include/ouster_ros/os_point.h)
+#if __has_include("ouster_ros/os_point.h")
+#include "ouster_ros/os_point.h"
+#else
 #include "ouster_ros/include/ouster_ros/os_point.h"
+#endif
 #include "autoware_point_types/types.hpp"
 #include "dw_version.hpp"
 #include <algorithm>
