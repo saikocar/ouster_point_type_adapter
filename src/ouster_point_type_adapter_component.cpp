@@ -12,7 +12,9 @@
 #include "autoware_point_types/types.hpp"
 #include "dw_version.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <limits>
 #include <sstream>
 
 namespace ouster_point_type_adapter
@@ -31,6 +33,12 @@ namespace ouster_point_type_adapter
     this->declare_parameter("sort_by_time", true);
     RCLCPP_INFO(this->get_logger(), "version %s", DW_VERSION);
     RCLCPP_INFO(this->get_logger(), "sort_by_time: %s", this->get_parameter("sort_by_time").as_bool() ? "true" : "false");
+    // 点群の header の時刻を、最も早い点の時刻にする(既定 false = 今までどおりスキャンの始まり)。
+    // Autoware の歪み補正は配列の先頭の点の時刻の姿勢にそろえるが、出力の header は入力のまま。
+    // azimuth_window で先頭の列が無い台(エルガミオの右 27.8 ms・左 8.4 ms)は、走ると点群が 車速 × その時間 だけ前後にずれる。
+    // header を最も早い点の時刻にすれば、結合(concatenate)が header の差を車速で戻すので、ずれが消える。
+    this->declare_parameter("stamp_at_first_point", false);
+    RCLCPP_INFO(this->get_logger(), "stamp_at_first_point: %s", this->get_parameter("stamp_at_first_point").as_bool() ? "true" : "false");
     //this->declare_parameter("reflectivity_as_intensity", (bool) false);
   }
 
@@ -103,6 +111,7 @@ namespace ouster_point_type_adapter
     size_t points_count = 0;
     double prev_stamp = 0;
     double stamp_sum = 0;
+    uint32_t min_t_ns = std::numeric_limits<uint32_t>::max();  // 最も早い点の相対時刻 [ns]
     for (const auto &point_in : input_pointcloud->points)
     { 
       if (!std::isfinite(point_in.x) || !std::isfinite(point_in.y) || !std::isfinite(point_in.z)) continue; //remove NaNs
@@ -122,6 +131,7 @@ namespace ouster_point_type_adapter
       point_out.time_stamp = static_cast<double>(point_in.t) / 1e9 + rclcpp::Time(msg->header.stamp).seconds(); // convert nsec to sec
       output_pointcloud->points.emplace_back(point_out);
       points_count++;
+      min_t_ns = std::min(min_t_ns, static_cast<uint32_t>(point_in.t));
 
       stamp_sum += static_cast<double>(point_in.t) / 1e9 - prev_stamp;
       prev_stamp = static_cast<double>(point_in.t) / 1e9;
@@ -143,6 +153,9 @@ namespace ouster_point_type_adapter
     // Convert pcl to ros message
     pcl::toROSMsg(*output_pointcloud, *pointcloud_msg);
     pointcloud_msg->header.stamp = msg->header.stamp;//this->now();
+    if (points_count > 0 && this->get_parameter("stamp_at_first_point").as_bool()) {
+      pointcloud_msg->header.stamp = rclcpp::Time(msg->header.stamp) + rclcpp::Duration(std::chrono::nanoseconds(min_t_ns));
+    }
     pointcloud_msg->height = 1;
     pointcloud_msg->width = points_count;
 

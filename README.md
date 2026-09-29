@@ -29,3 +29,10 @@ This package provides a ROS2 composable node for converting a `PointCloud2` mess
   which leaves a lateral offset proportional to lateral acceleration (about 0.3-0.4 m per 1 m/s^2 for 128 rings),
   and it takes the first point in the array as the reference time.
 - The node prints `version <branch>@<hash>` at startup.
+
+## stamp_at_first_point (2026-09-29)
+- Parameter `stamp_at_first_point` (bool, default `false`): set the output `header.stamp` to the time of the earliest point instead of the scan start.
+- Why: Autoware's distortion corrector aligns all points to the pose at the first point in the array but keeps the input header.
+  With an `azimuth_window` that drops the first columns, the cloud is shifted along the travel direction by speed x (first point - header)
+  (Ergamio: front_right 27.8 ms, front_left 8.4 ms; right vs top +0.22 m above 32 km/h). Concatenate compensates header differences with twist.
+- Use together with `sort_by_time: true`.
